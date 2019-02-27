@@ -1,0 +1,988 @@
+---
+title: "Text Analytics Boston useR"
+author: ""
+date: ""
+output:
+  html_document:
+    toc: false
+    toc_depth: 1
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# <strong>Text Mining & Visualization</strong> {.tabset .tabset-fade .tabset-pills}
+
+
+<style>
+  .main-container {
+    max-width: 1200px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+</style>
+
+
+## About Me
+![](N:/Bryan/TextAnalytics/text-is-data.jpg)
+
+### - BS in Applied Science from US Coast Guard Academy; studed heavy metals in surface waters
+### - MS in Chemisry researching organometallic semiconductors
+### - MBA in Finance
+### - Spent most of my career in Catastrophe Risk Modeling in the insurance industry
+### - Also worked in banking, marketing, and insuretech
+
+## Why Text Mining
+![](N:/Bryan/TextAnalytics/Percentage-image.png)
+
+## Text Analytics & Natural Language Processing
+### Generally Consists of Three Phases
+### * Text analytics and visualization
+####   - Consists of theming, keyword(key phrase) searching, tokenization and visualization
+### * Predictive modeling with text as the independent variables (NLP)
+####   - Can employ deep learning models or traditional 'bag of words' models
+### * Chatbots and AI
+
+### Process
+<img src="N:/Bryan/TextAnalytics/text-mining.jpg" width="1000">
+
+
+
+## Requires Specialized Libraries
+### Not all are used here, but this is a good list
+### Additional supporting libraries for modeling
+### Order of library loading matters due to overlap and masking
+```{r loadLibraries, echo=T, warning=FALSE, message=FALSE, cache = F, tidy=T}
+
+library(ggplot2)
+library(reshape2)
+library(scales)
+library(readxl)
+library(SnowballC)          # Porter's word stemming
+library(textstem)           # Perform setmming and lemmatization
+library(tm)                 # Text Cleaning and Processing
+library(RTextTools)         # Automatic Text Classification via Supervised Learning
+library(stringi)            # For processing strings
+library(wordcloud)          # Plot word clouds
+library(wordcloud2)         # Fancy plotting of word clouds
+library(RWeka)              # Machine Learning Java Library for Tokenization
+library(tidytext)           # Additional Text Processing Library (new release)
+library(tidyr)              
+library(knitr)
+library(dendextend)         # Making Dendograms
+library(dendextendRcpp)     # Supporting package for dendextend
+library(qdap)               # Bridge Gap Between Qualitative Data and Quantitative Analysis
+
+library(topicmodels)        # For LDA
+
+
+# Modeling Libraries
+library(caret)
+library(Metrics)
+library(pROC)
+library(naivebayes)         # Naive Bayes package
+library(klaR)               # Alternative NB package
+library(e1071)              # Windows specific modeling package best NB package
+library(caTools)            # Utility function to help modeling split
+library(randomForest)
+
+# Manipulating Data
+library(dplyr)
+
+```
+
+
+```{r loadData, echo=F, message=F, warning=F}
+setwd('N:/Bryan/Survey')
+dataURL <- 'SurveyCleanheaders.xlsx'
+
+# read the files from excel
+survey <- readxl::read_excel(dataURL, sheet = 1, col_names = TRUE,
+                     col_types = NULL, na = "", skip = 0)
+
+
+# use this theme for any ggplots
+theme_bryan <- function () { 
+  theme(axis.text.x = element_text(size = 8, color = 'blue', angle = 90),
+        legend.position = 'right',
+        axis.text.y = element_text(color = 'blue'),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        strip.text.x = element_text(size = 10, face = 'bold'),
+        strip.background = element_rect(fill = 'light blue'))
+}
+```
+
+
+## Understanding Stemming and Lemmatization
+### Not always used
+### - Stemming is a process that removes endings such as affixes.
+### - Lemmatization is the process of grouping inflected forms together as a single base form.
+```{r lemmaStem, echo=T}
+
+wv <- c('wolves', 'dogs', 'cats', 'birdies')
+```
+```{r compare, echo=T}
+textstem::stem_words(wv)
+
+lemmatize_words(wv)
+```
+
+
+## TF-IDF
+```{r tfidt, echo=F}
+# Some r code
+```
+### TF-IDF: Term Frequency-Inverse Document Frequency
+- Reflects how important a word is to a document in a collection or corpus
+- Example: 
+- Doc 1 "this is a sample text"
+- Doc 2 "this example is another example of text"
+- tf("this", doc 1) = 1/5
+- tf("this", doc 2) = 1/7
+- idf("this", Corpus) = log(counts/documents that contain word) = log(2/2) = 0
+- tfidf("this", doc 1) = .2 * 0 = 0
+- tfidf("this", doc 2) = .14 * 0 = 0
+
+### "this" is not that informative since it appears in all documents
+
+- Use the word "example"
+- tf("example", doc 1) = 0/5 = 0
+- tf("example", doc 2) = 2/7 = .285
+- idf("example", Corpus) = log(2/1) = .301 (base 10)
+- tfidf("example", doc 1) = 0 * .301 = 0
+- tfidf("example", doc 2) = .2854 * .301 = 0.0857
+
+### Unique words get a higher score
+
+
+
+## Text Often Needs Preliminary Cleaning
+```{r cleanText, echo=T, message=F, warning=F}
+# Get the region and text
+textData <- survey %>% dplyr::select(LikeMost,
+                              Region)
+
+# Remove NA
+textData <- na.omit(textData)
+
+# First step in Processing
+textData$LikeMost <- tolower(textData$LikeMost)
+
+# remove the 'na', 'n/a' using a grob vs text substitution
+# this is like a regex
+grx <- glob2rx('*na*|*n/a*')
+cleanData <- subset(textData, subset = !grepl(grx, textData$LikeMost))
+
+# adjust the stopwords so that ngatives are included
+# create revised stopwords list to include some key words in keep
+newWords <- stopwords("english")
+keep <- c("no", "more", "not", "can't", "cannot", "isn't", "aren't", "wasn't",
+          "weren't", "hasn't", "haven't", "hadn't", "doesn't", "don't", "didn't", "won't")
+newWords <- newWords [! newWords %in% keep]
+
+# clean up the words from hidden chars and convert to utf-8
+cleanData$LikeMost <- iconv(cleanData$LikeMost, to = "utf-8")
+
+```
+
+
+```{r factors, echo=F}
+# Reduce the regions
+# Change the groupings for frequency
+cleanData$Region <- as.character(cleanData$Region)
+cleanData$Region <- ifelse(cleanData$Region == 'East North Central', 'Central', cleanData$Region)
+cleanData$Region <- ifelse(cleanData$Region == 'East South Central','Central', cleanData$Region)
+cleanData$Region <- ifelse(cleanData$Region == 'West North Central','Central', cleanData$Region)
+cleanData$Region <- ifelse(cleanData$Region == 'West South Central','Central', cleanData$Region)
+cleanData$Region = as.factor(cleanData$Region)
+likeLevels = levels(cleanData$Region)
+```
+
+
+## Standard Pre-processing and Tokenizing
+### - Order of steps matters, especially punctuation, need to remove it after you remove contraction words
+### - tm_map function allows for functions to be added like stemming and lemmatization
+### - Set token value to 2 for creating bigrams
+```{r processText, echo=T, message=F, warning=F}
+like <- VCorpus(VectorSource(cleanData$LikeMost))
+like <- tm_map(like,PlainTextDocument)
+like <- tm_map(like, removeWords, newWords)
+like <- tm_map(like, removeWords, c("i", "like"))
+like <- tm_map(like, removePunctuation)
+like <- tm_map(like, removeNumbers)
+like <- tm_map(like, stripWhitespace) 
+
+tokens <- 2
+MygramTokenizer <- function(x) {NGramTokenizer(x, Weka_control(min = tokens, max = tokens))}
+
+# make the TDM
+likeTDM <- TermDocumentMatrix(like, control = list(tokenize = MygramTokenizer))
+# dim(likeTDM)
+print(likeTDM$dimnames$Terms[1:100])
+
+tokenMatrix <- as.matrix(likeTDM)
+# Sort it most frequent to least frequent and create a table
+tokenV <- sort(rowSums(tokenMatrix), decreasing = TRUE)
+token.d <- data.frame(word = names(tokenV), freq=tokenV)
+table(token.d$freq)
+
+
+```
+
+
+
+## Tokenizing Text
+### Use a Term Document Matrix
+### - Tokenizing splits phrases into tokens
+#### - Words, Bigrams, Trigrams, etc.
+### - TDM Terms are rows, documents are columns, values are counts
+### - The transpose is a DTM, where documents are rows and terms are columns
+### - Each has separate uses, DTM is used when there are factors
+```{r tokenize, echo=T, message=F, warning=F}
+likeTDM <- TermDocumentMatrix(like, control = list(tokenize = MygramTokenizer))
+# dim(likeTDM)
+# print(likeTDM$dimnames$Terms)
+
+tokenMatrix <- as.matrix(likeTDM)
+# sort it most frequent to least frequent and create a table
+tokenV <- sort(rowSums(tokenMatrix), decreasing = TRUE)
+token.d <- data.frame(word = names(tokenV), freq=tokenV)
+table(token.d$freq)
+head(token.d, 20)
+```
+
+
+## Plot a Cloud of the Phrases
+```{r plot, echo=T, message=F, warning=F, fig.height=10, fig.width=12, cache=T}
+wordcloud(token.d$word, token.d$freq,scale=c(8,.2), min.freq = 1, max.words = 1000,
+          random.order = FALSE,rot.per=0.15, use.r.layout=FALSE,
+          colors = brewer.pal(8,"Dark2"))
+
+```
+
+
+
+```{r clusterData, echo=F, warning=F, message=F}
+# cluster the text by region
+# create the generation field
+
+survey$Generation <- factor(survey$AgeRange, ordered = T)
+levels(survey$Generation)[levels(survey$Generation) =='18 to 21'] <- 'Gen Z'
+levels(survey$Generation)[levels(survey$Generation) =='22 to 34'] <- 'Millennials'
+levels(survey$Generation)[levels(survey$Generation) =='35 to 44'] <- 'Gen X'
+levels(survey$Generation)[levels(survey$Generation) =='45 to 54'] <- 'Gen X'
+levels(survey$Generation)[levels(survey$Generation) =='55 to 64'] <- 'Boomers+'
+levels(survey$Generation)[levels(survey$Generation) =='65 to 74'] <- 'Boomers+'
+levels(survey$Generation)[levels(survey$Generation) =='75 or older'] <- 'Boomers+'
+
+survey$Generation <- ordered(survey$Generation, levels = c('Gen Z', 'Millennials', 'Gen X', 'Boomers+'))
+
+
+# get the text
+textData <- survey %>%
+  select(LikeMost,
+         Generation,
+         Region)
+
+
+```
+
+
+## Standard Text Pre-Processing
+- Make two passes: initial to get into format for corpus and then process corpus
+```{r clusterClean, echo=T, warning=F, message=F}
+# First cleaning to prepare for corpus
+textData$LikeMost <- tolower(textData$LikeMost) 
+textData$LikeMost <- iconv(textData$LikeMost, to = "utf-8")
+cleanText <- textData %>% filter(! is.na(textData$LikeMost))
+
+
+# Standard pre-processing
+like <- VCorpus(VectorSource(cleanText$LikeMost))
+like <- tm_map(like,PlainTextDocument)
+like <- tm_map(like, removeWords, newWords)
+like <- tm_map(like, removePunctuation)
+like <- tm_map(like, removeWords, c("i", "like", "na"))
+like <- tm_map(like, removeNumbers)
+like <- tm_map(like, stripWhitespace)
+
+```
+
+
+## Hierarchical Clustering
+### Uses a Document Term Matrix so we can use the factors in the data
+### - Convert the DTM to a data frame
+### - Attach the Region Dimension to the DTM
+```{r cluster, echo=T, warning=F, message=F}
+# Make Document Term Matrix
+# Preserves the Document Order to Attach Factors
+likeDTM <- DocumentTermMatrix(like)
+
+# Convert it to a data frame via matrix
+# Collapse it down to region (9 obseravations)
+textDF <- as.data.frame(as.matrix(likeDTM))
+textDF$Region <- as.factor(cleanText$Region)
+dfRegion <- aggregate(textDF[,-length(textDF)], by = list(textDF$Region), sum)
+
+# Remove sparse terms and columns by picking columns that sum to 5 or more
+# Setting the sum equal to a frequency for the entire set
+dfRegionRed <- dfRegion[,colSums(dfRegion[,2:length(dfRegion)]) > 5]
+rownames(dfRegionRed) <- dfRegion[,1]
+
+# Create a correlation matrix and make it a distance matrix
+words <- length(dfRegionRed) 
+dis <- as.dist(1 - cov2cor(cov(dfRegionRed[,c(1:words)], 
+                               method = "pearson", 
+                               use = "pairwise.complete.obs")))
+```
+
+
+## Dendrogram of Hierarchical Clusters
+### Adjacent regions are saying similar things
+```{r dend, echo=T, message=F, warning=F, fig.height=6, fig.width=12, cache=T}
+par(mar = c(3.5, .5, 3.5, 9))
+d <- dist(dfRegionRed, method = "euclidean")
+hc <- hclust(d)
+dend <- d %>% hclust %>% as.dendrogram
+labels_cex(dend) <- 1.25
+dend %>% 
+  color_branches(k=9) %>%
+  color_labels(9) %>%
+  highlight_branches_lwd(4) %>% 
+  plot(horiz=TRUE, main = "Word Clusters by Region", axes = T, xlim = c(15,0))
+```
+
+
+
+## Tidytext Library 
+### - New library using Tidyverse format
+### - Employs a different set of commands and can achieve similar results
+### - Make a new plot that gives a more in-depth view by word
+```{r tidyVersion, echo=T, message=F, warning=F, fig.height=10, fig.width=12, cache=T}
+
+# Get the data and do initial formatting
+textData <- survey %>%
+  select(LikeMost,
+         Region)
+textData <- na.omit(textData)
+textData$LikeMost <- tolower(textData$LikeMost)
+
+# Remove the 'na', 'n/a'
+grx <- glob2rx('*na*|*n/a*')
+cleanData <- subset(textData, subset = !grepl(grx, textData$LikeMost))
+
+# Simplify the Regions
+cleanData$Region <- ifelse(cleanData$Region == 'East North Central', 'Central', cleanData$Region)
+cleanData$Region <- ifelse(cleanData$Region == 'East South Central','Central', cleanData$Region)
+cleanData$Region <- ifelse(cleanData$Region == 'West North Central','Central', cleanData$Region)
+cleanData$Region <- ifelse(cleanData$Region == 'West South Central','Central', cleanData$Region)
+
+# Make Region a Factor
+cleanData$Region = as.factor(cleanData$Region)
+
+# Count Words by region
+like_words <- cleanData %>%
+  unnest_tokens(word, LikeMost) %>%
+  count(Region, word, sort = T) %>%
+  ungroup()
+
+head(like_words, 10)
+
+# Calculate tf_idf
+plot_like <- like_words %>%
+  bind_tf_idf(word, Region, n) %>%
+  arrange(desc(tf_idf)) %>% 
+  mutate(word = factor(word, levels = rev(unique(word))))
+
+# Make the plot
+plot_like %>%
+  group_by(Region) %>%
+  top_n(3, tf_idf) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, tf_idf)) %>%
+  ggplot(aes(word, tf_idf, fill = Region)) +
+  geom_col() + coord_flip() + 
+  facet_wrap(~Region, nrow = 1) + 
+  theme_bryan() + theme(legend.position = '')
+```
+
+## Plotting Bigrams
+```{r bigramPlot, echo=F, message=F, warning=F, fig.height=10, fig.width=12}
+cleanText$Region <- ifelse(cleanText$Region == 'East North Central', 'Central', cleanText$Region)
+cleanText$Region <- ifelse(cleanText$Region == 'East South Central','Central', cleanText$Region)
+cleanText$Region <- ifelse(cleanText$Region == 'West North Central','Central', cleanText$Region)
+cleanText$Region <- ifelse(cleanText$Region == 'West South Central','Central', cleanText$Region)
+
+
+
+like <- VCorpus(VectorSource(cleanText$LikeMost))
+likeText <- tm_map(like, PlainTextDocument, mc.cores=1)
+likeText <- tm_map(likeText, removeWords, newWords)
+likeText <- tm_map(likeText, removePunctuation)
+likeText <- tm_map(likeText, removeNumbers)
+
+tokens <- 2
+ngramTokenizer <- function(x) {RWeka::NGramTokenizer(x, RWeka::Weka_control(min = tokens, max = tokens))}
+
+likeDTM <- DocumentTermMatrix(likeText, control = list(tokenize = ngramTokenizer))
+
+# Reduce Sparseness
+# likeMat <- as.matrix(removeSparseTerms(x = likeDTM, sparse = .9992))
+likeMat <- as.matrix(likeDTM)
+
+# Make a Data Frame
+likeDF <- data.frame(likeMat)
+
+# Make region a factor
+likeDF$Region <- as.factor(cleanText$Region)
+
+# Get the counts
+dfLike <- aggregate(likeDF[,-length(likeDF)], by = list(likeDF$Region), sum)
+rownames(dfLike) <- dfLike[,1]
+colnames(dfLike)[1] <- 'Region'
+
+# Melt the data
+meltLike <- melt(dfLike, id = 'Region',
+                 variable.name = 'Term',
+                 value.name = 'Count')
+
+# Clean up the periods that got added
+meltLike$Term <- gsub('\\.', ' ', meltLike$Term)
+
+# Roll up the counts
+rollup <- meltLike %>% group_by(Term, Region) %>%
+  summarise(Total = sum(Count))
+
+head(rollup)
+
+# Sort rollup by total
+rollup <- rollup %>%
+  arrange(desc(nchar(Term)), desc(Total))
+
+
+# Remove the zeros
+rollupFilter <- rollup %>%
+  group_by(Term) %>%
+  filter(Total > 0) %>%
+  arrange(desc(Total))
+
+# Get first 40
+toPlot <- head(rollupFilter,40)
+
+# Plot it
+g <- ggplot(toPlot, aes(x = Term, fill = Region), y = Total) + coord_flip() + 
+  geom_bar() + facet_wrap(~Region, nrow = 1) + 
+  theme_bryan() + scale_y_discrete(limits = c(0,1), expand = c(0,0)) + 
+  theme(axis.text.x = element_text(angle = 0), legend.position = 'none')
+g
+
+```
+
+
+## Plotting Bigrams with Lemmatization
+### There is some change in the terms from first plot 
+```{r lemma, echo=F, message=F, warning=F, fig.height=10, fig.width=12}
+# Lemmatization to clean text
+# Ensure Lowercase then lemmatize
+cleanText$LikeMost <- tolower(cleanText$LikeMost)
+cleanText$LikeMost <- lemmatize_strings(cleanText$LikeMost)
+
+likeCorpus <- VCorpus(VectorSource(cleanText$LikeMost))
+likeLemma <- tm_map(likeCorpus, PlainTextDocument, mc.cores=1)
+likeLemma <- tm_map(likeLemma, removeWords, newWords)
+likeLemma <- tm_map(likeLemma, removePunctuation)
+likeLemma <- tm_map(likeLemma, removeNumbers)
+
+
+tokens <- 2
+ngramTokenizer <- function(x) {RWeka::NGramTokenizer(x, RWeka::Weka_control(min = tokens, max = tokens))}
+
+likeDTM <- DocumentTermMatrix(likeLemma, control = list(tokenize = ngramTokenizer))
+
+# Make Matrix and then Data Frame
+likeMat <- as.matrix(likeDTM)
+likeDF <- data.frame(likeMat)
+
+# Make region a character 
+likeDF$Region <- as.character(cleanText$Region)
+likeDF$Region <- as.factor(likeDF$Region)
+
+# Get the counts
+dfLike <- aggregate(likeDF[,-length(likeDF)], by = list(likeDF$Region), sum)
+rownames(dfLike) <- dfLike[,1]
+colnames(dfLike)[1] <- 'Region'
+
+# Melt the data
+meltLike <- melt(dfLike, id = 'Region',
+                 variable.name = 'Term',
+                 value.name = 'Count')
+
+# Clean up the periods that got added
+meltLike$Term <- gsub('\\.', ' ', meltLike$Term)
+
+# Roll up the counts
+rollup <- meltLike %>% group_by(Term, Region) %>%
+  summarise(Total = sum(Count))
+
+head(rollup)
+
+# Sort rollup by total
+rollup <- rollup %>%
+  arrange(desc(nchar(Term)), desc(Total))
+
+# remove odd characters
+rollup <- rollup %>% filter(!grepl('X',Term))
+
+
+# Remove the zeros
+rollupFilter <- rollup %>%
+  group_by(Term) %>%
+  filter(Total > 0) %>%
+  arrange(desc(Total))
+
+# Get enough to plot
+toPlot <- head(rollupFilter,50)
+
+# Plot it
+g <- ggplot(toPlot, aes(x = Term, fill = Region), y = Total) + coord_flip() + 
+  geom_bar() + facet_wrap(~Region, nrow = 1) + 
+  theme_bryan() + scale_y_discrete(limits = c(0,1), expand = c(0,0)) + 
+  theme(axis.text.x = element_text(angle = 0), legend.position = 'none')
+g
+```
+
+
+
+
+## Word Associations and Frequencies
+### - TM package has supporting functions for frequency and correlation
+### - Correlation is calculated from the DTM
+```{r associations, echo=T, message=F, warning=F, fig.height=10, fig.width=12}
+
+### Words with at least three mentions
+findFreqTerms(likeDTM, lowfreq = 3, highfreq = Inf)
+
+### Words Correlated to "customer service" with at least .25
+keyTerm <- "customer service"
+wordAssoc <- findAssocs(likeDTM, keyTerm, .25)
+
+# Convert to a dataframe
+wordAssocDF <- data.frame(Corr=as.numeric(unlist(wordAssoc)),
+                          Terms = gsub(paste(keyTerm,'.', sep = ''),'',names(unlist(wordAssoc))))
+
+head(wordAssocDF)
+
+# Plot it
+wordP <- ggplot(wordAssocDF, aes(y = Corr, x = reorder(Terms, Corr))) + 
+  geom_col(position = 'stack', color = 'white', fill = 'dark green') +
+  coord_flip() + 
+  # shape = 23, size = 3, fill = 'white'
+  ggtitle(paste("Phrases that are Correlated with", keyTerm)) + 
+            xlab("Correlation of Terms") +
+            ylab("Terms (Most Frequent at Top)") + 
+            theme_bryan()
+
+wordP
+```
+
+
+## Natural Language Processing
+### - Using words or phrases as variables in models
+### - Traditional classification models: Random Forest, GLMNET, Naive Bayes
+### - More advanced with Markov and Hidden Markov Models: sequencing
+### - Deep learning with Recurrent Neural Networks
+####    - Long Short-Term Memory (LSTM) models
+####    - CNNs can work too, pick out key clusters of words
+
+
+
+## Random Forest
+### - Modeling performed without caret package
+```{r randomForest, echo=T, message=F, warning=F, fig.height=8, fig.width=12}
+setwd('N:/Bryan/Templates')
+dataset_original = read.delim('Restaurant_Reviews.tsv', quote = '', stringsAsFactors = FALSE)
+
+
+# Processing
+# Note that this includes stemming
+corpus = VCorpus(VectorSource(dataset_original$Review))
+corpus = tm_map(corpus, content_transformer(tolower))
+corpus = tm_map(corpus, removeNumbers)
+corpus = tm_map(corpus, removePunctuation)
+corpus = tm_map(corpus, removeWords, stopwords())
+corpus = tm_map(corpus, stemDocument)
+corpus = tm_map(corpus, stripWhitespace)
+
+# Creating the Bag of Words model
+# Reduce the variable size with removal of sparse terms
+dtm = DocumentTermMatrix(corpus)
+dtmRed = removeSparseTerms(dtm, 0.999)
+dataset = as.data.frame(as.matrix(dtmRed))
+dataset$Liked = dataset_original$Liked
+
+
+# Encoding the target feature as factor
+dataset$Liked <- ifelse(dataset$Liked==1,'yes','no')
+dataset$Liked <- as.factor(dataset$Liked)
+
+
+# Splitting the dataset into the Training set and Test set
+set.seed(123)
+split = sample.split(dataset$Liked, SplitRatio = 0.8)
+training_set = subset(dataset, split == TRUE)
+test_set = subset(dataset, split == FALSE)
+
+# Fitting Random Forest Classification to the Training set
+classifier = randomForest(x = training_set[-692],
+                          y = training_set$Liked,
+                          ntree = 10)
+
+# Predicting the Test set results
+y_pred = predict(classifier, newdata = test_set[-692])
+
+# Making the Confusion Matrix
+confusionMatrix(y_pred, test_set[, 692])
+
+varImpPlot(classifier, main = "Variable Importance of Random Forest")
+```
+
+
+## GLMNET
+### - Elastic net classifier with caret package
+### - Model uses same data as random forest
+```{r glmnet, echo=T, message=F, warning=F, fig.height=8, fig.width=12}
+# Use GLMNET model
+
+# Create the names of the variables
+# This is done in the Caret package
+`%notin%` <- function(x,y) !(x %in% y)
+allNames <- names(dataset)
+outcomeNames <- c("Liked")
+predictorNames <- allNames[allNames %notin% outcomeNames]
+predictorNames
+
+
+# caret package modeling
+outcome <- "Liked"
+objControl <- trainControl(method = 'cv', number = 3, returnResamp = 'none',
+                           summaryFunction = twoClassSummary, classProbs = TRUE)
+objModel <- train(training_set[,predictorNames], training_set[,outcome],
+                  method = 'glmnet',
+                  metric = "ROC",
+                  trControl = objControl)
+
+# Raw predictions
+predictions <- predict(object = objModel, test_set[,predictorNames], type = 'raw')
+head(predictions)
+postResample(pred = predictions, obs = as.factor(test_set[,outcome]))
+
+
+# Get probailities from predictions
+predictions <- predict(object = objModel, test_set[,predictorNames], type = "prob")
+head(predictions)
+
+# Get the AUC from probs
+auc <- roc(ifelse(test_set[,outcome]=="yes",1,0),predictions[[2]])
+print(auc$auc)
+
+#  Confusion matrix
+confusionMatrix(predict(object = objModel, test_set[,predictorNames], type = 'raw'),
+                        test_set[,outcome])
+
+
+#check for variable importance - top 40
+plot(varImp(objModel, scale = F),top=40, main = " Word Importance with GLMNET Model")
+
+
+```
+
+
+## Naive Bayes
+### - Very common model used with text
+### - Use a dictionary created from the training set to reduce variables
+### - Specify the model using e1071 package
+####     - Multiple packages contain the NB algorithm
+### - Variable importance plots are conditional probabilities
+```{r nb, echo=T, message=F, warning=F, fig.height=8, fig.width=12}
+# Shuffle the dataset first
+set.seed(123)
+dfShuffle <- dataset_original[sample(nrow(dataset_original)), ]
+dfShuffle <- dataset_original[sample(nrow(dataset_original)), ]
+glimpse(dfShuffle)
+
+# make the class variable
+dfShuffle$Liked <- ifelse(dfShuffle$Liked==1,'yes','no')
+dfShuffle$Liked <- as.factor(dfShuffle$Liked)
+
+# Apply processing
+corpus = VCorpus(VectorSource(dfShuffle$Review))
+corpus = tm_map(corpus, content_transformer(tolower))
+corpus = tm_map(corpus, removeNumbers)
+corpus = tm_map(corpus, removePunctuation)
+corpus = tm_map(corpus, removeWords, stopwords())
+corpus = tm_map(corpus, stemDocument)
+corpus = tm_map(corpus, stripWhitespace)
+length(corpus)
+
+# Do a 80/20 split
+
+set.seed(123)
+split_ratio = .8
+split = sample.split(dfShuffle$Liked, SplitRatio = split_ratio)
+training_set = subset(dfShuffle, split == TRUE)
+test_set = subset(dfShuffle, split == FALSE) 
+
+cut <- split_ratio * nrow(dfShuffle)
+
+# Create a dtm, there are 1577 words
+dtm = DocumentTermMatrix(corpus)
+
+dtm_train <- dtm[1:cut,]
+dtm_test <- dtm[(cut+1):nrow(dfShuffle),]
+
+corpus_train <- corpus[1:cut]
+corpus_test <- corpus[(cut+1):nrow(dfShuffle)]
+
+# reduce using frequency
+freq <- 5
+wordFreq <- findFreqTerms(dtm_train, freq)
+length((wordFreq))
+
+dtm_train_nb <- DocumentTermMatrix(corpus_train, control=list(dictionary = wordFreq))
+dim(dtm_train_nb)
+
+dtm_test_nb <- DocumentTermMatrix(corpus_test, control=list(dictionary = wordFreq))
+dim(dtm_test_nb)
+
+# convert to matrix and data frame
+training_set <- as.data.frame(as.matrix(dtm_train_nb))
+testing_data <- as.data.frame(as.matrix(dtm_test_nb))
+outcome <- dfShuffle$Liked[1:cut]
+actual <- dfShuffle$Liked[(cut+1):nrow(dfShuffle)]
+training_data <- cbind(outcome,training_set)
+
+
+# Specify the model using e1071 package
+objModel <- e1071::naiveBayes(outcome ~ ., data = training_data, laplace = 1)
+
+# Raw classes - actually yields conditional probabilities
+predictions <- predict(object = objModel, testing_data, type = 'raw')
+
+# get the AUC Use the Raw Predictions
+auc <- roc(ifelse(as.character(actual)=='yes',1,0),predictions[,2])
+print(auc$auc)
+
+# Confusion matrix
+confusionMatrix(predict(object = objModel, testing_data),
+                actual)
+
+
+# Unlist the tables
+condProbs <- unlist(objModel$tables)
+condProbDF <- data.frame(Prob=as.numeric(unlist(condProbs)),
+                          Terms = names(unlist(condProbs)))
+head(condProbDF)
+
+# Likelihood of the word, given they liked the place
+wordGivenLike <- condProbDF %>% 
+            mutate(CleanTerms = sub('2','',Terms)) %>%
+            arrange(desc(Prob)) %>%
+            filter(grepl('2', Terms))
+
+# Likelihood of the word, given they did not like the place
+wordGivenNotLike <- condProbDF %>% 
+  mutate(CleanTerms = sub('3','',Terms)) %>%
+  arrange(desc(Prob)) %>%
+  filter(grepl('3', Terms))
+
+# Plots contributing to liking
+wordRed <- wordGivenLike %>% filter(Prob > .025)
+wordP <- ggplot(wordRed, aes(y = Prob, x = reorder(CleanTerms, Prob))) + 
+  geom_col(position = 'stack', color = 'white', fill = 'dark green') +
+  coord_flip() + 
+  ggtitle('Words most likely to show up in "Liked" reviews') + 
+  ylab('Conditional Prob of Word Given They Liked It') +
+  xlab('') + 
+  theme_bryan()
+wordP
+
+# Make plots contributing to not liking
+wordNotRed <- wordGivenNotLike %>% filter(Prob > .15)
+wordP <- ggplot(wordNotRed, aes(y = Prob, x = reorder(CleanTerms, Prob))) + 
+  geom_col(position = 'stack', color = 'white', fill = 'dark green') +
+  coord_flip() + 
+  ggtitle('Words most likely to show up in reviews "Not Liked" ') + 
+  ylab('Conditional Prob of Word Given They Did not Liked It') +
+  xlab('') + 
+  theme_bryan()
+wordP
+
+
+
+```
+
+
+## Phrases as Variables
+```{r phraseModel, echo=F, message=F, warning=F, fig.height=8, fig.width=12}
+# create revised stopwords list
+newWords <- stopwords("english")
+keep <- c("no", "more", "not", "can't", "cannot", "isn't", "aren't", "wasn't",
+          "weren't", "hasn't", "haven't", "hadn't", "doesn't", "don't", "didn't", "won't")
+newWords <- newWords [! newWords %in% keep]
+
+corpus = VCorpus(VectorSource(dataset_original$Review))
+corpus = tm_map(corpus, content_transformer(tolower))
+corpus = tm_map(corpus, removeNumbers)
+corpus = tm_map(corpus, removePunctuation)
+corpus = tm_map(corpus, removeWords, newWords)
+corpus = tm_map(corpus, stripWhitespace)
+
+tokens <- 2
+ngramTokenizer <- function(x) {RWeka::NGramTokenizer(x, RWeka::Weka_control(min = tokens, max = tokens))}
+
+ngramDTM <- DocumentTermMatrix(corpus, control = list(tokenize = ngramTokenizer))
+
+# Reduce Sparseness and Convert Reduces to 817
+dtmRed = removeSparseTerms(ngramDTM, 0.9995)
+dataset = as.data.frame(as.matrix(dtmRed))
+
+dataset$Liked = dataset_original$Liked
+
+
+# Encoding the target feature as factor
+# dataset$Liked = as.factor(dataset$Liked, levels = c(0, 1))
+dataset$Liked <- ifelse(dataset$Liked==1,'yes','no')
+dataset$Liked <- as.factor(dataset$Liked)
+
+set.seed(123)
+split = sample.split(dataset$Liked, SplitRatio = 0.8)
+training_set = subset(dataset, split == TRUE)
+test_set = subset(dataset, split == FALSE)
+
+
+# alternate model glmnet
+`%notin%` <- function(x,y) !(x %in% y)
+allNames <- names(dataset)
+outcomeNames <- "Liked"
+predictorNames <- allNames[allNames %notin% outcomeNames]
+
+
+
+outcome <- "Liked"
+objControl <- trainControl(method = 'cv', number = 3, returnResamp = 'none',
+                           summaryFunction = twoClassSummary, classProbs = TRUE)
+objModel <- train(training_set[,predictorNames], training_set[,outcome],
+                  method = 'glmnet',
+                  metric = "ROC",
+                  trControl = objControl)
+
+```
+
+
+### GLMNET Results
+### - Model is focusing on negatives as driving classification
+```{r phraseModelOutput, echo=F, message=F, warning=F, fig.height=8, fig.width=12}
+predictions <- predict(object = objModel, test_set[,predictorNames], type = 'raw')
+head(predictions)
+
+
+# Get probabilities from predictions
+predictions <- predict(object = objModel, test_set[,predictorNames], type = "prob")
+head(predictions)
+
+
+
+# get the AUC from probs
+auc <- roc(ifelse(test_set[,outcome]=="yes",1,0),predictions[[2]])
+print(auc$auc)
+
+
+confusionMatrix(predict(object = objModel, test_set[,predictorNames], type = 'raw'),
+                test_set[,outcome])
+
+
+#check for variable importance
+plot(varImp(objModel, scale = F),top=40, main = "Variable Importance of GLMNET")
+```
+
+
+### Random Forest Results
+#### - Picks up on phrases for 'not liked'
+```{r phraseModelOutputRF, echo=F, message=F, warning=F, fig.height=8, fig.width=12, cache=T}
+c <- ncol(dataset)
+classifier = randomForest(x = training_set[-c],
+                          y = training_set$Liked,
+                          ntree = 50)
+
+# Predicting the Test set results
+y_pred = predict(classifier, newdata = test_set[-c])
+
+# Making the Confusion Matrix
+confusionMatrix(y_pred, test_set[, c])
+
+varImpPlot(classifier, main = "Variable Importance of Random Forest")
+```
+
+
+## Topic Modeling with LDA
+### LDA is Latent Dirichlet Allocation
+#### Each document is a mixture of topics
+#### Each topic is a mixture of words; words can be shared between topics
+```{r ldaModeling, echo=T, message=F, warning=F, fig.height=8, fig.width=12, cache=T}
+newWords <- stopwords("english")
+keep <- c("no", "more", "not", "can't", "cannot", "isn't", "aren't", "wasn't",
+          "weren't", "hasn't", "haven't", "hadn't", "doesn't", "don't", "didn't", "won't")
+newWords <- newWords [! newWords %in% keep]
+
+# replace punctuationc chars with space
+smallWds <- function(x) {rm_nchar_words(x, "1,3")}
+punctSpace <- function(x) {gsub("[[:punct:]]", " ", x)}
+
+# clean the text
+corpus = VCorpus(VectorSource(dataset_original$Review))
+corpus = tm_map(corpus, content_transformer(tolower))
+corpus <- tm_map(corpus, content_transformer(punctSpace))
+corpus = tm_map(corpus, removeNumbers)
+corpus = tm_map(corpus, removePunctuation)
+corpus = tm_map(corpus, removeWords, newWords)
+corpus <- tm_map(corpus, content_transformer(smallWds))
+corpus = tm_map(corpus, stripWhitespace)
+
+# tokenize
+tokens <- 2
+ngramTokenizer <- function(x) {RWeka::NGramTokenizer(x, RWeka::Weka_control(min = tokens, max = tokens))}
+ngramDTM <- DocumentTermMatrix(corpus, control = list(tokenize = ngramTokenizer))
+
+# use LDA, set k = 4
+# Find the sum of words in each Document ensure no zeros
+rowTotals <- apply(ngramDTM , 1, sum) 
+dtmClean   <- ngramDTM[rowTotals> 0, ]
+
+reviews_lda <- LDA(dtmClean, k = 4, control = list(seed = 1234))
+reviews_lda
+
+# check topics
+reviews_topics <- tidy(reviews_lda, matrix = "beta")
+reviews_topics
+
+
+# Make the plot
+reviews_top_terms <- reviews_topics %>%
+group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+reviews_top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  theme_bryan() + 
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+
